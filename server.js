@@ -8,13 +8,33 @@ app.use(bodyParser.json());
 // 🔑 Секреты будут храниться в Render → Environment Variables
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
+const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
 
 app.get("/", (req, res) => {
   res.send("✅ PsyAbstract Orders Bot is running!");
 });
 
+// Simple in-memory rate limit — 10 requests/minute per IP, no extra dependency.
+const notifyHits = new Map();
+function rateLimited(ip) {
+  const now = Date.now();
+  const windowStart = now - 60_000;
+  const hits = (notifyHits.get(ip) || []).filter((t) => t > windowStart);
+  hits.push(now);
+  notifyHits.set(ip, hits);
+  return hits.length > 10;
+}
+
 // Эндпойнт, чтобы сайт мог слать уведомления
 app.post("/notify", async (req, res) => {
+  if (!NOTIFY_SECRET || req.get("X-Notify-Secret") !== NOTIFY_SECRET) {
+    return res.status(401).send({ error: "Unauthorized" });
+  }
+
+  if (rateLimited(req.ip)) {
+    return res.status(429).send({ error: "Too many requests" });
+  }
+
   const { order } = req.body;
 
   if (!order) {
